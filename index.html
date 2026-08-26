@@ -27,7 +27,7 @@
   }
   *{box-sizing:border-box;}
   body{margin:0;background:var(--paper);font-family:var(--sans);color:var(--steel-900);-webkit-font-smoothing:antialiased;letter-spacing:-0.01em;}
-  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Barlow+Condensed:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Barlow+Condensed:wght@600;700;800&family=Montserrat:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
   .plate{background:#fff;color:var(--steel-900);padding:14px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:14px;border-bottom:1px solid var(--line);}
   .plate-brand{display:flex;align-items:center;gap:11px;}
@@ -243,6 +243,12 @@
     .po-signatures{display:flex;justify-content:space-between;margin-top:60px;}
     .po-sig{width:45%;border-top:1px solid #000;text-align:center;padding-top:6px;font-size:11px;}
     .po-note{font-size:12px;margin-top:10px;}
+
+    /* Cotización: tipografía de marca (Montserrat, como el logo real de
+       WIMMER) en todo el documento — excepto las columnas de números y
+       precios, que quedan en la fuente monoespaciada para que alineen bien. */
+    #printQuoteContent{font-family:'Montserrat',Arial,sans-serif;}
+    #printQuoteContent .num{font-family:var(--mono);}
   }
 
   @media (max-width:720px){
@@ -1056,7 +1062,7 @@
     </table>
 
     <p class="po-note">
-      Observaciones: Los valores indicados en la presente cotización ya contemplan una bonificación comercial especial del <span id="quotePrintBonifNote"></span>% aplicada sobre los precios de lista. | Cotización sujeta a variaciones de tipo de cambio a la fecha y disponibilidad (<span id="quotePrintRateNote"></span>) | Forma de pago: Contado anticipado a la entrega (Depósito/Transferencia).
+      Observaciones: Los precios de esta cotización incluyen IVA (21%). Los valores indicados ya contemplan una bonificación comercial especial del <span id="quotePrintBonifNote"></span>% aplicada sobre los precios de lista. | Cotización sujeta a variaciones de tipo de cambio a la fecha y disponibilidad (<span id="quotePrintRateNote"></span>) | Forma de pago: Contado anticipado a la entrega (Depósito/Transferencia).
     </p>
     <p class="po-note">El presente presupuesto tiene validez hasta el <strong id="quotePrintValidUntil"></strong>.</p>
 
@@ -1101,7 +1107,7 @@
 
     <div class="wpl-infobar">
       <div><strong>FORMA DE PAGO CONTADO</strong></div>
-      <div id="priceListPrintIvaNote">Los Precios NO incluyen IVA (21%)</div>
+      <div id="priceListPrintIvaNote">Los Precios INCLUYEN IVA (21%)</div>
       <div style="text-align:right;">Compra Mínima<br><strong id="priceListPrintMinima">$ 1.000.000</strong></div>
     </div>
 
@@ -2621,12 +2627,12 @@ document.getElementById('btnPrintPriceList').onclick = ()=>{
   if(moneda==='ars' && rate<=0){ showToast('Cargá el tipo de cambio arriba en el header para imprimir en pesos'); return; }
   if(rows.length===0){ showToast('No hay artículos marcados para incluir en la lista'); return; }
 
-  document.getElementById('priceListPrintIvaNote').textContent = `Los Precios NO incluyen IVA (21%) — ${priceListLabel(tipo)}`;
+  document.getElementById('priceListPrintIvaNote').textContent = `Los Precios INCLUYEN IVA (21%) — ${priceListLabel(tipo)}`;
   document.getElementById('priceListPrintRate').textContent = rate>0 ? `(TC del día: US$ 1 = $ ${rate.toLocaleString('es-AR')})` : '(tipo de cambio sin configurar)';
 
   const printHead = document.getElementById('priceListPrintHeadRow');
   if(tipo==='cf_mayorista'){
-    printHead.innerHTML = `<th>Numero de Art</th><th>Articulo</th><th class="num">Consumidor Final<br>SIN IVA</th><th class="num">Mayorista<br>SIN IVA</th>`;
+    printHead.innerHTML = `<th>Numero de Art</th><th>Articulo</th><th class="num">Consumidor Final<br>CON IVA</th><th class="num">Mayorista<br>CON IVA</th>`;
     document.getElementById('priceListPrintBody').innerHTML = rows.map(a=>{
       const usd = Number(a.listPrice)||0;
       return `<tr><td>${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td><td class="num">${priceListFmt(usd*0.90, moneda, rate)}</td></tr>`;
@@ -3204,10 +3210,13 @@ function renderQuote(){
     const art = articles.find(a=>a.sku===it.sku);
     const listPriceUsd = art ? (Number(art.listPrice)||0) : 0;
     if(listPriceUsd===0) missingPrice = true;
-    const unitArs = listPriceUsd * (1-discountRate) * usdRate;
-    const lineSubtotal = unitArs * it.qty;
-    const lineIva = lineSubtotal * IVA_RATE;
-    subtotalNeto += lineSubtotal;
+    // El precio de lista YA INCLUYE el 21% de IVA — para discriminarlo hay
+    // que dividir el total con IVA, no volver a sumarlo (eso duplicaría el impuesto).
+    const unitConIva = listPriceUsd * (1-discountRate) * usdRate;
+    const lineTotalConIva = unitConIva * it.qty;
+    const lineNeto = lineTotalConIva / (1 + IVA_RATE);
+    const lineIva = lineTotalConIva - lineNeto;
+    subtotalNeto += lineNeto;
     const w = art ? (Number(art.weightPerBox)||0) : 0;
     if(w===0) missingWeight = true;
     totalWeight += w * it.qty;
@@ -3215,11 +3224,11 @@ function renderQuote(){
       <td class="sku">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(art ? art.name : '?')}</td>
       <td class="num">${fmtInt(it.qty)}</td>
-      <td class="num">${fmtARS(unitArs)}</td>
+      <td class="num">${fmtARS(unitConIva)}</td>
       <td class="num">${bonifPct}%</td>
-      <td class="num">${fmtARS(lineSubtotal)}</td>
+      <td class="num">${fmtARS(lineNeto)}</td>
       <td class="num">21%</td>
-      <td class="num total-cell">${fmtARS(lineSubtotal+lineIva)}</td>
+      <td class="num total-cell">${fmtARS(lineTotalConIva)}</td>
     </tr>`;
   }).join('');
 
@@ -3294,18 +3303,18 @@ document.getElementById('quotePrint').onclick = ()=>{
   document.getElementById('quotePrintItems').innerHTML = q.items.map(it=>{
     const art = articles.find(a=>a.sku===it.sku);
     const listPriceUsd = art ? (Number(art.listPrice)||0) : 0;
-    const unitArs = listPriceUsd * (1-q.discountRate) * q.usdRate;
-    const lineSubtotal = unitArs * it.qty;
-    const lineIva = lineSubtotal * IVA_RATE;
+    const unitConIva = listPriceUsd * (1-q.discountRate) * q.usdRate;
+    const lineTotalConIva = unitConIva * it.qty;
+    const lineNeto = lineTotalConIva / (1 + IVA_RATE);
     return `<tr>
       <td>${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(art?art.name:'?')}</td>
       <td class="num">${fmtInt(it.qty)}</td>
-      <td class="num">${fmtARS(unitArs)}</td>
+      <td class="num">${fmtARS(unitConIva)}</td>
       <td class="num">${q.bonifPct}%</td>
-      <td class="num">${fmtARS(lineSubtotal)}</td>
+      <td class="num">${fmtARS(lineNeto)}</td>
       <td class="num">21%</td>
-      <td class="num">${fmtARS(lineSubtotal+lineIva)}</td>
+      <td class="num">${fmtARS(lineTotalConIva)}</td>
     </tr>`;
   }).join('');
 
