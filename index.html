@@ -227,6 +227,8 @@
     .wpl-table th.num{text-align:right;}
     .wpl-table td{border:1px solid #ccc;padding:6px 8px;font-size:11px;}
     .wpl-table td.num{text-align:right;font-weight:600;}
+    .price-cat-row td{background:var(--steel-100);font-weight:700;text-transform:uppercase;font-size:11px;letter-spacing:0.5px;padding:7px 8px;border:1px solid var(--line);}
+    .wpl-table tr.price-cat-row td{background:#1a1a1a;color:#fff;font-family:var(--display);}
 
     .po-header h1{font-size:20px;margin:0;}
     .po-header .sub{font-size:11px;color:#444;}
@@ -2543,6 +2545,16 @@ document.getElementById('viajanteFiltro').onchange = renderViajanteTab;
 // ---- Lista de precios ----
 let priceListSelected = new Set();
 let priceListSeen = new Set();
+// Categorías tal como están en wimmerargentina.com.ar/pedido-wimmer:
+// "Tornillos estructurales" y "Accesorios y herrajes"
+function articleCategoria(sku){
+  if(sku.startsWith('OTV+') || sku.startsWith('8000-') || sku.startsWith('70042') || sku.startsWith('7042-')){
+    return 'Accesorios y herrajes';
+  }
+  return 'Tornillos Estructurales';
+}
+const CATEGORIA_ORDEN = ['Tornillos Estructurales', 'Accesorios y herrajes'];
+
 function priceListRows(){
   const q = document.getElementById('priceListSearch').value.trim().toLowerCase();
   articles.forEach(a=>{
@@ -2552,7 +2564,12 @@ function priceListRows(){
     }
   });
   return articles.filter(a=>!q || a.sku.toLowerCase().includes(q) || a.name.toLowerCase().includes(q))
-                 .slice().sort((a,b)=>a.name.localeCompare(b.name));
+                 .slice().sort((a,b)=>{
+                   const catA = CATEGORIA_ORDEN.indexOf(articleCategoria(a.sku));
+                   const catB = CATEGORIA_ORDEN.indexOf(articleCategoria(b.sku));
+                   if(catA !== catB) return catA - catB;
+                   return articles.indexOf(a) - articles.indexOf(b); // dentro de la categoría, el orden del catálogo (por línea y diámetro)
+                 });
 }
 function priceListLabel(tipo){
   if(tipo==='cf_mayorista') return 'Consumidor Final / Mayorista';
@@ -2567,6 +2584,19 @@ function priceListFmt(usdValue, moneda, rate){
   }
   return fmtUSD(usdValue);
 }
+function withCategoryHeaders(rows, colspan, rowFn){
+  let lastCat = null;
+  const out = [];
+  rows.forEach(a=>{
+    const cat = articleCategoria(a.sku);
+    if(cat !== lastCat){
+      out.push(`<tr class="price-cat-row"><td colspan="${colspan}">${escapeHtml(cat)}</td></tr>`);
+      lastCat = cat;
+    }
+    out.push(rowFn(a));
+  });
+  return out.join('');
+}
 function renderPriceList(){
   const rows = priceListRows();
   const rate = config.usdRate || 0;
@@ -2577,28 +2607,28 @@ function renderPriceList(){
   const head = document.getElementById('priceListHeadRow');
   if(tipo==='cf_mayorista'){
     head.innerHTML = `<th></th><th>SKU</th><th>Artículo</th><th class="num">Consumidor Final</th><th class="num">Mayorista</th>`;
-    document.getElementById('priceListBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListBody').innerHTML = withCategoryHeaders(rows, 5, a=>{
       const usd = Number(a.listPrice)||0;
       const checked = priceListSelected.has(a.sku) ? 'checked' : '';
       return `<tr><td><input type="checkbox" class="priceListCheck" data-sku="${escapeAttr(a.sku)}" ${checked}></td><td class="sku">${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td><td class="num">${priceListFmt(usd*0.90, moneda, rate)}</td></tr>`;
-    }).join('');
+    });
   }else if(tipo==='todos'){
     head.innerHTML = `<th></th><th>SKU</th><th>Artículo</th><th class="num">Lista</th><th class="num">Compra directa (5%)</th><th class="num">Constructor (10%)</th><th class="num">Fabricante/Ferret. (20%)</th>`;
-    document.getElementById('priceListBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListBody').innerHTML = withCategoryHeaders(rows, 7, a=>{
       const usd = Number(a.listPrice)||0;
       const cols = [0.05, 0.10, 0.20].map(d=>priceListFmt(usd*(1-d), moneda, rate)).join('</td><td class="num">');
       const checked = priceListSelected.has(a.sku) ? 'checked' : '';
       return `<tr><td><input type="checkbox" class="priceListCheck" data-sku="${escapeAttr(a.sku)}" ${checked}></td><td class="sku">${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td><td class="num">${cols}</td></tr>`;
-    }).join('');
+    });
   }else{
     head.innerHTML = `<th></th><th>SKU</th><th>Artículo</th><th class="num">PVP</th><th class="num">Precio (${priceListLabel(tipo)})</th>`;
     const d = Number(tipo);
-    document.getElementById('priceListBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListBody').innerHTML = withCategoryHeaders(rows, 5, a=>{
       const pvp = Number(a.listPrice)||0;
       const usd = pvp * (1-d);
       const checked = priceListSelected.has(a.sku) ? 'checked' : '';
       return `<tr><td><input type="checkbox" class="priceListCheck" data-sku="${escapeAttr(a.sku)}" ${checked}></td><td class="sku">${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(pvp, moneda, rate)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td></tr>`;
-    }).join('');
+    });
   }
   document.querySelectorAll('.priceListCheck').forEach(chk=>{
     chk.onchange = ()=>{
@@ -2633,25 +2663,25 @@ document.getElementById('btnPrintPriceList').onclick = ()=>{
   const printHead = document.getElementById('priceListPrintHeadRow');
   if(tipo==='cf_mayorista'){
     printHead.innerHTML = `<th>Numero de Art</th><th>Articulo</th><th class="num">Consumidor Final<br>CON IVA</th><th class="num">Mayorista<br>CON IVA</th>`;
-    document.getElementById('priceListPrintBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListPrintBody').innerHTML = withCategoryHeaders(rows, 4, a=>{
       const usd = Number(a.listPrice)||0;
       return `<tr><td>${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td><td class="num">${priceListFmt(usd*0.90, moneda, rate)}</td></tr>`;
-    }).join('');
+    });
   }else if(tipo==='todos'){
     printHead.innerHTML = `<th>SKU</th><th>Artículo</th><th class="num">Lista</th><th class="num">Compra directa 5%</th><th class="num">Constructor 10%</th><th class="num">Fabric./Ferret. 20%</th>`;
-    document.getElementById('priceListPrintBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListPrintBody').innerHTML = withCategoryHeaders(rows, 6, a=>{
       const usd = Number(a.listPrice)||0;
       const cols = [0.05, 0.10, 0.20].map(d=>`<td class="num">${priceListFmt(usd*(1-d), moneda, rate)}</td>`).join('');
       return `<tr><td>${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td>${cols}</tr>`;
-    }).join('');
+    });
   }else{
     printHead.innerHTML = `<th>SKU</th><th>Artículo</th><th class="num">PVP</th><th class="num">Precio (${priceListLabel(tipo)})</th>`;
     const d = Number(tipo);
-    document.getElementById('priceListPrintBody').innerHTML = rows.map(a=>{
+    document.getElementById('priceListPrintBody').innerHTML = withCategoryHeaders(rows, 4, a=>{
       const pvp = Number(a.listPrice)||0;
       const usd = pvp * (1-d);
       return `<tr><td>${escapeHtml(a.sku)}</td><td>${escapeHtml(a.name)}</td><td class="num">${priceListFmt(pvp, moneda, rate)}</td><td class="num">${priceListFmt(usd, moneda, rate)}</td></tr>`;
-    }).join('');
+    });
   }
 
   document.getElementById('printOrderContent').style.display = 'none';
