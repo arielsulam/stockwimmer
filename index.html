@@ -201,12 +201,23 @@
 
   #printArea{display:none;}
   @media print{
+    @page{ margin:10mm; }
     body *{visibility:hidden;}
     #printArea, #printArea *{visibility:visible;}
     #printArea{display:block;position:absolute;top:0;left:0;width:100%;padding:20px;}
+    /* Evita hojas en blanco/parciales de más: que las tablas no corten una
+       fila a la mitad al pasar de página, y que el encabezado se repita
+       en cada hoja en vez de dejar huecos raros. */
+    .wpl-table thead, table.po-table thead{ display:table-header-group; }
+    .wpl-table tr, table.po-table tr, .price-cat-row{ page-break-inside:avoid; break-inside:avoid; }
+    .po-signatures{ page-break-inside:avoid; }
     .po-header{display:flex;justify-content:space-between;border-bottom:3px solid #000;padding-bottom:10px;margin-bottom:16px;}
 
     .wpl-bar{height:5px;background:#c0392b;margin-bottom:0;}
+    #printPriceListContent{position:relative;}
+    .wpl-corner{position:absolute;top:0;width:110px;height:30px;background:#111;z-index:2;}
+    .wpl-corner.left{left:0;clip-path:polygon(0 0,100% 0,0 100%);}
+    .wpl-corner.right{right:0;clip-path:polygon(100% 0,100% 100%,0 0);}
     .wpl-header{display:flex;align-items:center;justify-content:space-between;gap:18px;padding:16px 4px;flex-wrap:wrap;}
     .wpl-logo{display:flex;align-items:center;gap:10px;}
     .wpl-logo-circle{width:60px;height:60px;display:flex;align-items:center;justify-content:center;flex-shrink:0;}
@@ -424,6 +435,9 @@
       <input type="text" id="opSearch" placeholder="Buscar por Nº de OP o cliente…">
       <button class="btn amber" id="btnNewOp" title="Crear una nueva Orden de Pedido">+ Nueva Orden de Pedido</button>
       <button class="btn purple" id="btnPasteWhatsapp" title="Pegar un mensaje de WhatsApp del pedido web y crear la Solicitud automáticamente">📋 Pegar pedido de WhatsApp</button>
+      <button class="btn ghost" id="btnViajanteTemplate" title="Descargar una planilla Excel con el catálogo completo para que el viajante anote las cantidades pedidas">📥 Planilla para viajante (Excel)</button>
+      <button class="btn ghost" id="btnViajanteImport" title="Cargar la planilla del viajante ya completada y crear la Solicitud de Pedido automáticamente">📤 Importar pedido de viajante</button>
+      <input type="file" id="fileViajanteImport" accept=".xlsx,.xls,.csv" style="display:none;">
     </div>
     <p class="hint" style="margin-bottom:16px;">Para ventas directas (web, WhatsApp, teléfono) antes de mandarlas a despachar. Cuando una OP llega a "Enviar", el botón "Enviar a Sell2Ship" te abre el despacho ya precargado con los datos del cliente.</p>
     <div class="kanban" id="opKanban"></div>
@@ -645,21 +659,23 @@
     </div>
 
     <table>
-      <thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Precio unit.</th><th class="num">% Bonif.</th><th class="num">Subtotal</th><th class="num">Alícuota</th><th class="num">Subtotal c/IVA</th></tr></thead>
+      <thead><tr><th>Código</th><th>Descripción</th><th class="num">Cantidad</th><th class="num">Precio unit. caja</th><th class="num">Precio unit. tornillo</th><th class="num">% Bonif.</th><th class="num">Subtotal</th><th class="num">Alícuota</th><th class="num">Subtotal c/IVA</th></tr></thead>
       <tbody id="quoteItemsBody"></tbody>
       <tfoot>
-        <tr><th colspan="7">SUBTOTAL (neto)</th><th class="num" id="quoteSubtotalArs"></th></tr>
-        <tr><th colspan="7">IVA 21%</th><th class="num" id="quoteIvaArs"></th></tr>
-        <tr><th colspan="7">TOTAL</th><th class="num" id="quoteTotalArs"></th></tr>
-        <tr><th colspan="7">PESO TOTAL DEL PEDIDO</th><th class="num" id="quoteWeightTotal"></th></tr>
+        <tr><th colspan="8">SUBTOTAL (neto)</th><th class="num" id="quoteSubtotalArs"></th></tr>
+        <tr><th colspan="8">IVA 21%</th><th class="num" id="quoteIvaArs"></th></tr>
+        <tr><th colspan="8">TOTAL</th><th class="num" id="quoteTotalArs"></th></tr>
+        <tr><th colspan="8">PESO TOTAL DEL PEDIDO</th><th class="num" id="quoteWeightTotal"></th></tr>
       </tfoot>
     </table>
+    <p class="hint">PRECIO DE REFERENCIA DE TORNILLO UNITARIO CON IVA: resulta de dividir el precio total de la caja con el descuento correspondiente (con IVA) por la cantidad de tornillos que trae esa caja.</p>
     <p class="hint" id="quoteMissingPriceHint" style="display:none;color:var(--red);"></p>
     <p class="hint" id="quoteMissingRateHint" style="display:none;color:var(--red);">Falta cargar el tipo de cambio del día (arriba, en el header de la app) — sin eso no se puede pesificar la cotización.</p>
 
     <div class="modal-actions">
       <button class="btn ghost" id="quoteCancel" title="Cerrar la cotización sin guardar cambios">Cerrar</button>
       <button class="btn ghost" id="quotePrint" title="Abrir la cotización lista para imprimir">🖨 Imprimir cotización</button>
+      <button class="btn ghost" id="quoteSavePdf" title="Generar el PDF de esta cotización y guardarlo como adjunto en la Orden de Pedido, sin tener que subirlo después">💾 Guardar PDF en la OP</button>
       <button class="btn amber" id="quoteSaveToOp" title="Guardar esta cotización dentro de la Orden de Pedido">Guardar en la OP</button>
     </div>
   </div>
@@ -1060,9 +1076,10 @@
     </div>
 
     <table class="po-table">
-      <thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant.</th><th class="num">Precio unit.</th><th class="num">% Bonif.</th><th class="num">Subtotal</th><th class="num">Alícuota</th><th class="num">Subtotal c/IVA</th></tr></thead>
+      <thead><tr><th>Código</th><th>Descripción</th><th class="num">Cant.</th><th class="num">Precio unit. caja</th><th class="num">Precio unit. tornillo</th><th class="num">% Bonif.</th><th class="num">Subtotal</th><th class="num">Alícuota</th><th class="num">Subtotal c/IVA</th></tr></thead>
       <tbody id="quotePrintItems"></tbody>
     </table>
+    <p class="po-note">PRECIO DE REFERENCIA DE TORNILLO UNITARIO CON IVA: resulta de dividir el precio total de la caja con el descuento correspondiente (con IVA) por la cantidad de tornillos que trae esa caja.</p>
 
     <p class="po-note">
       Observaciones: Los precios de esta cotización incluyen IVA (21%). Los valores indicados ya contemplan una bonificación comercial especial del <span id="quotePrintBonifNote"></span>% aplicada sobre los precios de lista. | Cotización sujeta a variaciones de tipo de cambio a la fecha y disponibilidad (<span id="quotePrintRateNote"></span>) | Forma de pago: Contado anticipado a la entrega (Depósito/Transferencia).
@@ -1078,6 +1095,8 @@
   </div>
 
   <div id="printPriceListContent" style="display:none;">
+    <div class="wpl-corner left"></div>
+    <div class="wpl-corner right"></div>
     <div class="wpl-bar"></div>
     <div class="wpl-header">
       <div class="wpl-logo">
@@ -1121,6 +1140,7 @@
 </div>
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 // ---- Conexión con Supabase (tu propia base de datos) ----
@@ -2244,10 +2264,14 @@ function printOrder(order){
     totalWeight += it.qty * w;
   });
   document.getElementById('poWeight').textContent = totalWeight.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' kg' + (missingWeight ? ' (incompleto — falta cargar peso de algún artículo)' : '');
+  const prevTitle = document.title;
+  document.title = (isS2S ? 'Remito Wimmer ' : 'Orden de envío Wimmer ') + order.id.toUpperCase();
   try{
     window.print();
   }catch(e){
     showToast('No se pudo abrir la impresión — descargá el archivo y abrilo en el navegador');
+  }finally{
+    document.title = prevTitle;
   }
 }
 function reprintOrder(orderId){
@@ -2437,9 +2461,12 @@ function printLowStockReport(){
   document.getElementById('printPriceListContent').style.display = 'none';
   document.getElementById('printQuoteContent').style.display = 'none';
   document.getElementById('printReportContent').style.display = 'block';
+  const prevTitle = document.title;
+  document.title = 'Reporte bajo minimo Wimmer ' + new Date().toISOString().slice(0,10);
   try{ window.print(); }
   catch(e){ showToast('No se pudo abrir la impresión — descargá el archivo y abrilo en el navegador'); }
   finally{
+    document.title = prevTitle;
     document.getElementById('printOrderContent').style.display = 'block';
     document.getElementById('printReportContent').style.display = 'none';
   }
@@ -2499,7 +2526,7 @@ function renderViajanteTab(){
         <span style="font-family:var(--mono);font-size:13px;">Comisión total: ${fmtARS(totalComision)} — ${pagados}/${g.rows.length} pagadas</span>
       </div>
       <table style="border:none;">
-        <thead><tr><th>OP</th><th>Cliente</th><th>Viajante</th><th>Fecha</th><th class="num">Monto neto</th><th class="num">Comisión (7%)</th><th>Pagado</th></tr></thead>
+        <thead><tr><th>OP</th><th>Cliente</th><th>Viajante</th><th>Fecha</th><th class="num">Monto neto</th><th class="num">Comisión (7%)</th><th>Pagado</th><th>Comprobante</th></tr></thead>
         <tbody>
           ${g.rows.map(r=>`<tr>
             <td class="sku">${escapeHtml(r.op.number)}</td>
@@ -2509,6 +2536,7 @@ function renderViajanteTab(){
             <td class="num">${fmtARS(r.monto)}</td>
             <td class="num total-cell">${fmtARS(r.comision)}</td>
             <td style="text-align:center;"><input type="checkbox" class="viajantePagadoCheck" data-op="${escapeAttr(r.op.id)}" ${r.pagado?'checked':''}></td>
+            <td style="min-width:150px;">${viajanteComprobantesHtml(r.op)}</td>
           </tr>`).join('')}
         </tbody>
       </table>
@@ -2529,6 +2557,53 @@ function renderViajanteTab(){
     };
   });
 }
+function viajanteComprobantesHtml(op){
+  const list = op.comisionComprobantes || [];
+  const links = list.map((a,i)=>`<div style="display:flex;align-items:center;gap:4px;font-size:11px;margin-bottom:2px;">
+      <a href="#" onclick="opViewAttachment('${escapeAttr(a.path)}'); return false;" style="color:var(--amber);text-decoration:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:110px;">📄 ${escapeHtml(a.name)}</a>
+      <button type="button" title="Quitar este comprobante" style="background:none;border:none;color:var(--red);cursor:pointer;font-size:12px;padding:0;" onclick="viajanteRemoveComprobante('${escapeAttr(op.id)}', ${i})">✕</button>
+    </div>`).join('');
+  return `${links}<button class="btn ghost small" type="button" title="Subir el comprobante de pago de esta comisión" onclick="viajanteUploadComprobante('${escapeAttr(op.id)}')">📎 Subir comprobante</button>`;
+}
+window.viajanteUploadComprobante = (opId)=>{
+  const input = document.createElement('input');
+  input.type = 'file';
+  input.multiple = true;
+  input.onchange = async ()=>{
+    const files = [...input.files];
+    if(files.length===0) return;
+    const o = ops.find(x=>x.id===opId);
+    if(!o) return;
+    __busy = true;
+    try{
+      o.comisionComprobantes = o.comisionComprobantes || [];
+      for(const file of files){
+        const path = `${opId}/comision_${Date.now()}_${file.name}`;
+        const { error } = await _sb.storage.from('op-adjuntos').upload(path, file);
+        if(error){ showToast('Error subiendo ' + file.name + ': ' + error.message); continue; }
+        o.comisionComprobantes.push({ name:file.name, path, size:file.size, uploadedAt:new Date().toISOString(), uploadedBy: currentUser?currentUser.name:'' });
+      }
+      await saveOps();
+      renderViajanteTab();
+      showToast('Comprobante(s) subido(s)');
+    }finally{ __busy = false; }
+  };
+  input.click();
+};
+window.viajanteRemoveComprobante = async (opId, index)=>{
+  const o = ops.find(x=>x.id===opId);
+  if(!o || !o.comisionComprobantes || !o.comisionComprobantes[index]) return;
+  if(!confirm('¿Quitar este comprobante?')) return;
+  const att = o.comisionComprobantes[index];
+  __busy = true;
+  try{
+    try{ await _sb.storage.from('op-adjuntos').remove([att.path]); }catch(e){}
+    o.comisionComprobantes.splice(index,1);
+    await saveOps();
+    renderViajanteTab();
+    showToast('Comprobante quitado');
+  }finally{ __busy = false; }
+};
 window.marcarMesPagado = async (monthKey, pagado)=>{
   const affected = viajanteRows().filter(r=>r.monthKey===monthKey);
   __busy = true;
@@ -2688,9 +2763,12 @@ document.getElementById('btnPrintPriceList').onclick = ()=>{
   document.getElementById('printReportContent').style.display = 'none';
   document.getElementById('printQuoteContent').style.display = 'none';
   document.getElementById('printPriceListContent').style.display = 'block';
+  const prevTitle = document.title;
+  document.title = 'Lista de precios Wimmer ' + new Date().toISOString().slice(0,10);
   try{ window.print(); }
   catch(e){ showToast('No se pudo abrir la impresión'); }
   finally{
+    document.title = prevTitle;
     document.getElementById('printPriceListContent').style.display = 'none';
     document.getElementById('printOrderContent').style.display = 'block';
   }
@@ -2931,6 +3009,84 @@ document.getElementById('waPasteCreate').onclick = async ()=>{
   }finally{ __busy = false; }
 };
 
+// ---- Planilla Excel para toma de pedidos de viajantes ----
+// Nota: como todavía no tengo la planilla puntual que se le mandó a
+// Palmiro, este es un formato de partida (Cliente/Localidad/Viajante +
+// catálogo con columna de cantidad) — si la planilla real usa otras
+// columnas, decime y la ajusto para que calcen exacto.
+document.getElementById('btnViajanteTemplate').onclick = ()=>{
+  try{
+    const header = ['SKU','Artículo','Piezas por caja','Cantidad (cajas)'];
+    const rows = articles.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(a=>[a.sku, a.name, a.pcsPerBox||0, '']);
+    const wsPedido = XLSX.utils.aoa_to_sheet([
+      ['Cliente', '', 'Localidad', '', 'Viajante', currentUser ? currentUser.name : ''],
+      [],
+      header,
+      ...rows
+    ]);
+    wsPedido['!cols'] = [{wch:16},{wch:45},{wch:14},{wch:16}];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, wsPedido, 'Pedido');
+    XLSX.writeFile(wb, `planilla_pedido_viajante_${new Date().toISOString().slice(0,10)}.xlsx`);
+    showToast('Planilla descargada — completá Cliente/Localidad y las cantidades, después usá "Importar pedido de viajante"');
+  }catch(e){ showToast('No se pudo generar la planilla'); }
+};
+document.getElementById('btnViajanteImport').onclick = ()=>document.getElementById('fileViajanteImport').click();
+document.getElementById('fileViajanteImport').onchange = async (e)=>{
+  const file = e.target.files[0];
+  if(!file) return;
+  __busy = true;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, {type:'array'});
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const aoa = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
+    if(aoa.length < 3){ showToast('La planilla no tiene el formato esperado'); return; }
+
+    const clientName = String((aoa[0]&&aoa[0][1])||'').trim();
+    const localidad = String((aoa[0]&&aoa[0][3])||'').trim();
+    const viajanteNombre = String((aoa[0]&&aoa[0][5])||'').trim();
+
+    let headerRowIdx = aoa.findIndex(r=>String((r&&r[0])||'').trim().toLowerCase()==='sku');
+    if(headerRowIdx===-1) headerRowIdx = 2;
+
+    const items = [];
+    const unmatched = [];
+    for(let i=headerRowIdx+1;i<aoa.length;i++){
+      const row = aoa[i];
+      if(!row || !row[0]) continue;
+      const sku = String(row[0]).trim();
+      const qty = Number(row[3]) || 0;
+      if(qty<=0) continue;
+      const art = articles.find(a=>a.sku===sku);
+      if(art) items.push({sku:art.sku, name:art.name, qty});
+      else unmatched.push(sku);
+    }
+    if(items.length===0){ showToast('No se encontraron cantidades cargadas en la planilla'); return; }
+
+    let note = `Cargado desde la planilla del viajante (${file.name}).`;
+    if(unmatched.length) note += `\nSKU no encontrados en el catálogo — revisar a mano: ${unmatched.join(', ')}`;
+
+    ops.push({
+      id: genId(), number: nextOpNumber(), stage: 'solicitud',
+      codigoSolicitud: '', telefonoInicial: '',
+      clientName, presupuesto: '', items,
+      address: { locality: localidad, cuit:'', condicionIva:'Responsable Inscripto' },
+      origen: 'viajante', viajanteNombre,
+      checklist: [], note, attachments: [],
+      createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
+    });
+    await saveOps();
+    renderOpKanban();
+    showToast(`Solicitud de Pedido creada desde la planilla del viajante (${items.length} artículo(s))`);
+  }catch(err){
+    showToast('No se pudo leer la planilla — revisá el formato');
+  }finally{
+    __busy = false;
+    e.target.value = '';
+  }
+};
+
 function nextOpNumber(){
   let max = 100;
   ops.forEach(o=>{
@@ -3130,18 +3286,22 @@ function collectOpChecklist(){
   })).filter(c=>c.text);
 }
 
-document.getElementById('opSave').onclick = async ()=>{
-  __busy = true;
-  try{
-    const codigoSolicitud = document.getElementById('opCodigo').value.trim();
-    const telefonoInicial = document.getElementById('opTelefonoInicial').value.trim();
-    const clientName = document.getElementById('opCliente').value.trim();
-    const stage = document.getElementById('opStage').value;
-    if(!clientName && !codigoSolicitud && stage!=='solicitud'){ showToast('Falta el nombre del cliente o el código de solicitud'); return; }
-    const items = collectItems('opItemsBody');
-    const origen = document.getElementById('opOrigen').value;
-    const viajanteNombre = origen==='viajante' ? document.getElementById('opViajanteNombre').value.trim() : '';
-    const address = {
+// Lee el formulario de la OP tal cual está en pantalla — se usa tanto al
+// guardar manualmente (opSave) como al generar/guardar una cotización o un
+// PDF sin haber tocado "Guardar" todavía (así no hace falta guardar la OP
+// a mano antes de poder cotizar).
+function collectOpFormData(){
+  const origen = document.getElementById('opOrigen').value;
+  return {
+    codigoSolicitud: document.getElementById('opCodigo').value.trim(),
+    telefonoInicial: document.getElementById('opTelefonoInicial').value.trim(),
+    clientName: document.getElementById('opCliente').value.trim(),
+    presupuesto: document.getElementById('opPresupuesto').value.trim(),
+    stage: document.getElementById('opStage').value,
+    items: collectItems('opItemsBody'),
+    origen,
+    viajanteNombre: origen==='viajante' ? document.getElementById('opViajanteNombre').value.trim() : '',
+    address: {
       cuit: document.getElementById('opCuit').value.trim(),
       condicionIva: document.getElementById('opCondicionIva').value,
       addressFinal: document.getElementById('opDirFinal').value.trim(),
@@ -3150,23 +3310,42 @@ document.getElementById('opSave').onclick = async ()=>{
       postalCode: document.getElementById('opCP').value.trim(),
       phone: document.getElementById('opCelular').value.trim(),
       email: document.getElementById('opEmailCliente').value.trim(),
-    };
-    const checklist = collectOpChecklist();
-    const note = document.getElementById('opNote').value.trim();
-    const presupuesto = document.getElementById('opPresupuesto').value.trim();
+    },
+    checklist: collectOpChecklist(),
+    note: document.getElementById('opNote').value.trim(),
+  };
+}
 
-    const existing = ops.find(x=>x.id===editingOpId);
-    if(existing){
-      Object.assign(existing, {codigoSolicitud, telefonoInicial, clientName, presupuesto, items, address, checklist, note, stage, origen, viajanteNombre});
-    }else{
-      ops.push({
-        id: editingOpId, number: nextOpNumber(), stage,
-        codigoSolicitud, telefonoInicial, clientName, presupuesto, items, address, checklist, note, origen, viajanteNombre,
-        attachments: window.__opNewAttachments || [],
-        createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
-      });
-    }
-    await saveOps();
+// Crea o actualiza (según corresponda) la OP con los datos actuales del
+// formulario, guarda en Supabase y devuelve el objeto ya persistido.
+// "extra" permite mezclarle campos adicionales (p.ej. la cotización) en el
+// mismo guardado, sin round-trip de más.
+async function ensureOpSaved(extra){
+  const data = collectOpFormData();
+  let existing = ops.find(x=>x.id===editingOpId);
+  if(existing){
+    Object.assign(existing, data, extra||{});
+  }else{
+    existing = {
+      id: editingOpId, number: nextOpNumber(),
+      attachments: window.__opNewAttachments || [],
+      createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
+      ...data, ...(extra||{}),
+    };
+    ops.push(existing);
+  }
+  await saveOps();
+  return existing;
+}
+
+document.getElementById('opSave').onclick = async ()=>{
+  __busy = true;
+  try{
+    const clientName = document.getElementById('opCliente').value.trim();
+    const codigoSolicitud = document.getElementById('opCodigo').value.trim();
+    const stage = document.getElementById('opStage').value;
+    if(!clientName && !codigoSolicitud && stage!=='solicitud'){ showToast('Falta el nombre del cliente o el código de solicitud'); return; }
+    await ensureOpSaved();
     document.getElementById('overlayOp').classList.remove('show');
     renderOpKanban();
     showToast('Orden de pedido guardada');
@@ -3249,11 +3428,17 @@ function renderQuote(){
     const w = art ? (Number(art.weightPerBox)||0) : 0;
     if(w===0) missingWeight = true;
     totalWeight += w * it.qty;
+    // Precio de referencia del tornillo unitario (con IVA): precio de la
+    // caja ya bonificada y con IVA, dividido la cantidad de tornillos que
+    // trae esa caja.
+    const pcs = art ? (Number(art.pcsPerBox)||0) : 0;
+    const unitTornillo = pcs > 0 ? (unitConIva / pcs) : null;
     return `<tr>
       <td class="sku">${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(art ? art.name : '?')}</td>
       <td class="num">${fmtInt(it.qty)}</td>
       <td class="num">${fmtARS(unitConIva)}</td>
+      <td class="num">${unitTornillo!==null ? fmtARS(unitTornillo) : '—'}</td>
       <td class="num">${bonifPct}%</td>
       <td class="num">${fmtARS(lineNeto)}</td>
       <td class="num">21%</td>
@@ -3292,30 +3477,29 @@ document.getElementById('quoteCancel').onclick = ()=>document.getElementById('ov
 
 document.getElementById('quoteSaveToOp').onclick = async ()=>{
   const q = renderQuote();
-  const o = ops.find(x=>x.id===editingOpId);
-  if(o){
-    o.quote = {
-      discountRate: q.discountRate, discountLabel: quoteDiscountLabel(q.discountRate),
-      usdRate: q.usdRate, subtotalNeto: q.subtotalNeto, ivaTotal: q.ivaTotal, total: q.grandTotal,
-      totalWeight: q.totalWeight, date: new Date().toISOString()
-    };
-    __busy = true;
-    try{ await saveOps(); renderOpKanban(); renderViajanteTab(); showToast('Cotización guardada en la OP'); }
-    finally{ __busy = false; }
-  }else{
-    showToast('Guardá la OP primero para poder asociarle la cotización');
-  }
+  __busy = true;
+  try{
+    // Ya no hace falta apretar "Guardar" en la Solicitud de Pedido antes de
+    // poder cotizar: si la OP todavía no existía en la base, se crea acá
+    // mismo con lo que haya cargado en el formulario.
+    await ensureOpSaved({
+      quote: {
+        discountRate: q.discountRate, discountLabel: quoteDiscountLabel(q.discountRate),
+        usdRate: q.usdRate, subtotalNeto: q.subtotalNeto, ivaTotal: q.ivaTotal, total: q.grandTotal,
+        totalWeight: q.totalWeight, date: new Date().toISOString()
+      }
+    });
+    renderOpKanban();
+    renderViajanteTab();
+    showToast('Cotización guardada en la OP');
+  }finally{ __busy = false; }
 };
 
-document.getElementById('quotePrint').onclick = ()=>{
-  const q = renderQuote();
-  if(q.usdRate<=0){ showToast('Cargá el tipo de cambio arriba en el header antes de imprimir'); return; }
-
-  document.getElementById('printOrderContent').style.display = 'none';
-  document.getElementById('printReportContent').style.display = 'none';
-  document.getElementById('printQuoteContent').style.display = 'block';
-
-  document.getElementById('quotePrintNumber').textContent = 'Nº ' + document.getElementById('opModalNumber').textContent;
+// Arma el contenido de #printQuoteContent a partir de una cotización ya
+// calculada (renderQuote()) — lo usan tanto "Imprimir cotización" como
+// "Guardar PDF en la OP", para no duplicar el armado del documento.
+function fillQuotePrintContent(q, opNumberLabel){
+  document.getElementById('quotePrintNumber').textContent = 'Nº ' + opNumberLabel;
   document.getElementById('quotePrintDate').textContent = new Date().toLocaleDateString('es-AR');
 
   const clientName = document.getElementById('opCliente').value || '—';
@@ -3335,11 +3519,14 @@ document.getElementById('quotePrint').onclick = ()=>{
     const unitConIva = listPriceUsd * (1-q.discountRate) * q.usdRate;
     const lineTotalConIva = unitConIva * it.qty;
     const lineNeto = lineTotalConIva / (1 + IVA_RATE);
+    const pcs = art ? (Number(art.pcsPerBox)||0) : 0;
+    const unitTornillo = pcs > 0 ? (unitConIva / pcs) : null;
     return `<tr>
       <td>${escapeHtml(it.sku)}</td>
       <td>${escapeHtml(art?art.name:'?')}</td>
       <td class="num">${fmtInt(it.qty)}</td>
       <td class="num">${fmtARS(unitConIva)}</td>
+      <td class="num">${unitTornillo!==null ? fmtARS(unitTornillo) : '—'}</td>
       <td class="num">${q.bonifPct}%</td>
       <td class="num">${fmtARS(lineNeto)}</td>
       <td class="num">21%</td>
@@ -3356,12 +3543,75 @@ document.getElementById('quotePrint').onclick = ()=>{
   document.getElementById('quotePrintIva').textContent = fmtARS(q.ivaTotal);
   document.getElementById('quotePrintTotalArs').textContent = fmtARS(q.grandTotal);
   document.getElementById('quotePrintWeight').textContent = q.totalWeight.toLocaleString('es-AR',{minimumFractionDigits:2,maximumFractionDigits:2}) + ' kg';
+}
 
+document.getElementById('quotePrint').onclick = ()=>{
+  const q = renderQuote();
+  if(q.usdRate<=0){ showToast('Cargá el tipo de cambio arriba en el header antes de imprimir'); return; }
+
+  document.getElementById('printOrderContent').style.display = 'none';
+  document.getElementById('printReportContent').style.display = 'none';
+  document.getElementById('printPriceListContent').style.display = 'none';
+  document.getElementById('printQuoteContent').style.display = 'block';
+
+  fillQuotePrintContent(q, document.getElementById('opModalNumber').textContent);
+
+  const prevTitle = document.title;
+  document.title = 'Presupuesto Wimmer ' + document.getElementById('opModalNumber').textContent;
   try{ window.print(); }
   catch(e){ showToast('No se pudo abrir la impresión'); }
   finally{
+    document.title = prevTitle;
     document.getElementById('printQuoteContent').style.display = 'none';
     document.getElementById('printOrderContent').style.display = 'block';
+  }
+};
+
+// ---- Guardar el PDF del presupuesto directo en la OP (sin imprimir/subir a mano) ----
+document.getElementById('quoteSavePdf').onclick = async ()=>{
+  const q = renderQuote();
+  if(q.usdRate<=0){ showToast('Cargá el tipo de cambio arriba en el header antes de guardar el PDF'); return; }
+  const btn = document.getElementById('quoteSavePdf');
+  btn.disabled = true;
+  const prevLabel = btn.textContent;
+  btn.textContent = 'Generando PDF...';
+  __busy = true;
+  try{
+    const o = await ensureOpSaved(); // crea la OP si todavía no existía
+
+    document.getElementById('printOrderContent').style.display = 'none';
+    document.getElementById('printReportContent').style.display = 'none';
+    document.getElementById('printPriceListContent').style.display = 'none';
+    document.getElementById('printQuoteContent').style.display = 'block';
+    fillQuotePrintContent(q, o.number);
+
+    const fileName = `presupuesto_${o.number}.pdf`;
+    let pdfBlob;
+    try{
+      pdfBlob = await html2pdf()
+        .from(document.getElementById('printQuoteContent'))
+        .set({ margin:8, filename:fileName, html2canvas:{scale:2, useCORS:true}, jsPDF:{unit:'mm', format:'a4', orientation:'portrait'} })
+        .outputPdf('blob');
+    }finally{
+      document.getElementById('printQuoteContent').style.display = 'none';
+      document.getElementById('printOrderContent').style.display = 'block';
+    }
+
+    const path = `${o.id}/${Date.now()}_${fileName}`;
+    const { error } = await _sb.storage.from('op-adjuntos').upload(path, pdfBlob, { contentType:'application/pdf' });
+    if(error){ showToast('No se pudo guardar el PDF: ' + error.message); return; }
+
+    o.attachments = o.attachments || [];
+    o.attachments.push({ name:fileName, path, size:pdfBlob.size, uploadedAt:new Date().toISOString(), uploadedBy: currentUser?currentUser.name:'' });
+    await saveOps();
+    renderOpAttachments(o.attachments);
+    showToast('PDF del presupuesto guardado en la orden — ya no hace falta subirlo a mano');
+  }catch(err){
+    showToast('No se pudo generar/guardar el PDF: ' + (err.message||err));
+  }finally{
+    btn.disabled = false;
+    btn.textContent = prevLabel;
+    __busy = false;
   }
 };
 
