@@ -1042,11 +1042,11 @@
       <div id="poStatusLine" style="display:none;"><strong>Estado:</strong> <span id="poStatus"></span></div>
     </div>
     <table class="po-table">
-      <thead><tr><th>SKU</th><th>Artículo</th><th class="num">Cantidad</th></tr></thead>
+      <thead><tr><th>SKU</th><th>EAN</th><th>Artículo</th><th class="num">Cantidad</th></tr></thead>
       <tbody id="poItems"></tbody>
       <tfoot>
-        <tr><th colspan="2">TOTAL</th><th class="num" id="poTotal"></th></tr>
-        <tr><th colspan="2">PESO TOTAL</th><th class="num" id="poWeight"></th></tr>
+        <tr><th colspan="3">TOTAL</th><th class="num" id="poTotal"></th></tr>
+        <tr><th colspan="3">PESO TOTAL</th><th class="num" id="poWeight"></th></tr>
       </tfoot>
     </table>
     <div class="po-note" id="poNote"></div>
@@ -2154,7 +2154,11 @@ document.getElementById('s2sSave').onclick = async ()=>{
 function buildMailContent(order){
   const c = order.customer || {};
   const fecha = new Date(order.date).toLocaleDateString('es-AR');
-  const lines = order.items.map(it=>`- ${it.sku} | ${it.name} | ${it.qty} u/cajas${it.obs ? ' | Obs: '+it.obs : ''}`).join('\n');
+  const lines = order.items.map(it=>{
+    const art = articles.find(a=>a.sku===it.sku);
+    const ean = (art && art.ean) ? art.ean : 's/EAN';
+    return `- ${it.sku} | EAN ${ean} | ${it.name} | ${it.qty} u/cajas${it.obs ? ' | Obs: '+it.obs : ''}`;
+  }).join('\n');
   const subject = `Despacho CASLAM SRL - ${c.name || 'cliente'} - ${fecha}`;
   const body = `Hola equipo de Sell2Ship,\n\nSolicitamos despachar el siguiente pedido:\n\n`
     + `Cliente / Nº de venta: ${c.name || '-'}\n`
@@ -2288,9 +2292,11 @@ function printOrder(order){
   document.getElementById('poDate').textContent = new Date(order.date).toLocaleString('es-AR');
   document.getElementById('poUser').textContent = order.user || '—';
   document.getElementById('poNote').textContent = order.note ? ('Nota: ' + order.note) : '';
-  document.getElementById('poItems').innerHTML = order.items.map(it=>
-    `<tr><td>${escapeHtml(it.sku)}</td><td>${escapeHtml(it.name)}${it.obs ? ' — '+escapeHtml(it.obs) : ''}</td><td class="num">${fmtInt(it.qty)}</td></tr>`
-  ).join('');
+  document.getElementById('poItems').innerHTML = order.items.map(it=>{
+    const art = articles.find(a=>a.sku===it.sku);
+    const ean = (art && art.ean) ? art.ean : '—';
+    return `<tr><td>${escapeHtml(it.sku)}</td><td>${escapeHtml(ean)}</td><td>${escapeHtml(it.name)}${it.obs ? ' — '+escapeHtml(it.obs) : ''}</td><td class="num">${fmtInt(it.qty)}</td></tr>`;
+  }).join('');
   document.getElementById('poTotal').textContent = fmtInt(order.items.reduce((s,it)=>s+it.qty,0));
 
   let totalWeight = 0;
