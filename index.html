@@ -1135,6 +1135,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Sortable/1.15.2/Sortable.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
 <script>
 // ---- Conexión con Supabase (tu propia base de datos) ----
 const _sbUrl = localStorage.getItem('wimmer_supabase_url');
@@ -3047,26 +3048,111 @@ document.getElementById('waPasteCreate').onclick = async ()=>{
 };
 
 // ---- Planilla Excel para toma de pedidos de viajantes ----
-// Nota: como todavía no tengo la planilla puntual que se le mandó a
-// Palmiro, este es un formato de partida (Cliente/Localidad/Viajante +
-// catálogo con columna de cantidad) — si la planilla real usa otras
-// columnas, decime y la ajusto para que calcen exacto.
-document.getElementById('btnViajanteTemplate').onclick = ()=>{
+// Calca exactamente el formato y estilo de la planilla real que se usa
+// hoy (Pedido_Tornillos_Wimmer.xlsx): título + nota + aclaración,
+// encabezado de 9 columnas (SKU, Artículo, Unid. x Caja, Precio Unitario
+// c/desc., PVP Caja, Precio Caja c/desc., Pedido (cajas), Unidades
+// Pedidas, Subtotal c/desc.), columna "Pedido (cajas)" resaltada en
+// celeste (es la única que completa el viajante) con fórmulas en vivo
+// para Unidades Pedidas/Subtotal/Total — pero generada con los precios,
+// el tipo de cambio y el descuento ACTUALES del sistema en vez de quedar
+// fija en el tiempo como el archivo original.
+const VIAJANTE_DESCUENTO = 0.30; // 30% — igual que la planilla real
+const VIAJANTE_COMPRA_MINIMA = 1000000;
+const VIAJANTE_CELESTE = 'FFC9DAF8';
+const VIAJANTE_HEADER_GRIS = 'FFF3F3F3';
+
+function viajantePlanillaRows(){
+  // Mismo universo y mismo orden que la planilla real: solo tornillos
+  // estructurales con precio cargado (sin accesorios/soportes).
+  return articles.filter(a => Number(a.listPrice)>0 && articleCategoria(a.sku)==='Tornillos Estructurales');
+}
+
+document.getElementById('btnViajanteTemplate').onclick = async ()=>{
+  if(typeof ExcelJS === 'undefined'){ showToast('No se pudo cargar la librería de Excel (sin conexión) — probá de nuevo'); return; }
+  const rate = config.usdRate || 0;
+  if(rate<=0){ showToast('Cargá el tipo de cambio arriba en el header antes de generar la planilla'); return; }
+  const rows = viajantePlanillaRows();
+  if(rows.length===0){ showToast('No hay artículos con precio cargado para armar la planilla'); return; }
+
   try{
-    const header = ['SKU','Artículo','Piezas por caja','Cantidad (cajas)'];
-    const rows = articles.slice().sort((a,b)=>a.name.localeCompare(b.name)).map(a=>[a.sku, a.name, a.pcsPerBox||0, '']);
-    const wsPedido = XLSX.utils.aoa_to_sheet([
-      ['Cliente', '', 'Localidad', '', 'Viajante', currentUser ? currentUser.name : ''],
-      [],
-      header,
-      ...rows
-    ]);
-    wsPedido['!cols'] = [{wch:16},{wch:45},{wch:14},{wch:16}];
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, wsPedido, 'Pedido');
-    XLSX.writeFile(wb, `planilla_pedido_viajante_${new Date().toISOString().slice(0,10)}.xlsx`);
-    showToast('Planilla descargada — completá Cliente/Localidad y las cantidades, después usá "Importar pedido de viajante"');
-  }catch(e){ showToast('No se pudo generar la planilla'); }
+    const wb = new ExcelJS.Workbook();
+    const ws = wb.addWorksheet('Pedido');
+    const pctLabel = Math.round(VIAJANTE_DESCUENTO*100);
+    const thin = {style:'thin', color:{argb:'FFB7B7B7'}};
+    const border = {top:thin, left:thin, bottom:thin, right:thin};
+    const money = '$#,##0.00';
+
+    ws.mergeCells('A1:I1');
+    ws.getCell('A1').value = 'Pedido Wimmer TORNILLOS WIMMER — LISTA DE PRECIOS Y TOMA DE PEDIDOS';
+    ws.getCell('A1').font = {bold:true, size:13};
+
+    ws.mergeCells('A2:I2');
+    ws.getCell('A2').value = `Precios INCLUYEN IVA (21%) — ${pctLabel}% de descuento aplicado — Compra mínima $${VIAJANTE_COMPRA_MINIMA.toLocaleString('es-AR')} — TC del día: US$ 1 = $${rate.toLocaleString('es-AR')}`;
+    ws.getCell('A2').font = {italic:true, size:10, color:{argb:'FF555555'}};
+
+    ws.mergeCells('A3:I3');
+    ws.getCell('A3').value = 'Completar SOLO la columna celeste "Pedido (cajas)" con la cantidad de cajas a pedir de cada artículo.';
+    ws.getCell('A3').font = {italic:true, size:10, color:{argb:'FFC0392B'}};
+
+    const headLabels = ['SKU','Artículo','Unid. x Caja','Precio Unitario (c/desc.)','PVP (Caja)','Precio Caja ('+pctLabel+'% desc.)','Pedido (cajas)','Unidades Pedidas','Subtotal (c/desc.)'];
+    const headRow = ws.getRow(4);
+    headLabels.forEach((label,i)=>{
+      const cell = headRow.getCell(i+1);
+      cell.value = label;
+      cell.font = {bold:true};
+      cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb: i===6 ? VIAJANTE_CELESTE : VIAJANTE_HEADER_GRIS}};
+      cell.border = border;
+      cell.alignment = {vertical:'middle', wrapText:true};
+    });
+    headRow.height = 28;
+
+    let r = 5;
+    rows.forEach(a=>{
+      const pcs = Number(a.pcsPerBox)||0;
+      const usd = Number(a.listPrice)||0;
+      const pvpCaja = usd * rate * pcs;
+      const precioUnitDesc = usd * (1-VIAJANTE_DESCUENTO) * rate;
+      const precioCajaDesc = pvpCaja * (1-VIAJANTE_DESCUENTO);
+      const row = ws.getRow(r);
+      row.getCell(1).value = a.sku;
+      row.getCell(2).value = a.name;
+      row.getCell(3).value = pcs;
+      row.getCell(4).value = precioUnitDesc; row.getCell(4).numFmt = money;
+      row.getCell(5).value = pvpCaja; row.getCell(5).numFmt = money;
+      row.getCell(6).value = precioCajaDesc; row.getCell(6).numFmt = money;
+      row.getCell(7).value = null; row.getCell(7).numFmt = '0';
+      row.getCell(8).value = {formula: `G${r}*C${r}`}; row.getCell(8).numFmt = '#,##0';
+      row.getCell(9).value = {formula: `H${r}*D${r}`}; row.getCell(9).numFmt = money;
+      for(let c=1;c<=9;c++){
+        const cell = row.getCell(c);
+        cell.border = border;
+        if(c===7) cell.fill = {type:'pattern', pattern:'solid', fgColor:{argb:VIAJANTE_CELESTE}};
+      }
+      r++;
+    });
+
+    const lastDataRow = r-1;
+    const totalRow = ws.getRow(r);
+    totalRow.getCell(6).value = 'TOTAL PEDIDO:';
+    totalRow.getCell(6).font = {bold:true};
+    totalRow.getCell(7).value = {formula: `SUM(G5:G${lastDataRow})`};
+    totalRow.getCell(8).value = {formula: `SUM(H5:H${lastDataRow})`};
+    totalRow.getCell(9).value = {formula: `SUM(I5:I${lastDataRow})`}; totalRow.getCell(9).numFmt = money;
+    for(let c=6;c<=9;c++){ totalRow.getCell(c).font = {bold:true}; totalRow.getCell(c).border = {top:{style:'medium'}, bottom:thin, left:thin, right:thin}; }
+
+    ws.columns = [{width:14},{width:48},{width:12},{width:16},{width:14},{width:18},{width:13},{width:15},{width:15}];
+    ws.views = [{state:'frozen', ySplit:4}];
+
+    const buf = await wb.xlsx.writeBuffer();
+    const blob = new Blob([buf], {type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = `planilla_pedido_viajante_${new Date().toISOString().slice(0,10)}.xlsx`;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+    showToast('Planilla descargada — el viajante completa solo la columna celeste "Pedido (cajas)"');
+  }catch(e){ showToast('No se pudo generar la planilla: ' + (e.message||e)); }
 };
 document.getElementById('btnViajanteImport').onclick = ()=>document.getElementById('fileViajanteImport').click();
 document.getElementById('fileViajanteImport').onchange = async (e)=>{
@@ -3078,14 +3164,16 @@ document.getElementById('fileViajanteImport').onchange = async (e)=>{
     const wb = XLSX.read(buf, {type:'array'});
     const sheet = wb.Sheets[wb.SheetNames[0]];
     const aoa = XLSX.utils.sheet_to_json(sheet, {header:1, defval:''});
-    if(aoa.length < 3){ showToast('La planilla no tiene el formato esperado'); return; }
-
-    const clientName = String((aoa[0]&&aoa[0][1])||'').trim();
-    const localidad = String((aoa[0]&&aoa[0][3])||'').trim();
-    const viajanteNombre = String((aoa[0]&&aoa[0][5])||'').trim();
 
     let headerRowIdx = aoa.findIndex(r=>String((r&&r[0])||'').trim().toLowerCase()==='sku');
-    if(headerRowIdx===-1) headerRowIdx = 2;
+    if(headerRowIdx===-1){ showToast('No se encontró la fila de encabezado (SKU) en la planilla'); return; }
+
+    // Esta planilla es solo el catálogo de precios con la columna "Pedido
+    // (cajas)" (índice 6) — no trae datos del cliente, así que se piden
+    // acá para armar la Solicitud de Pedido.
+    const clientName = (window.prompt('Nombre del cliente para esta Solicitud de Pedido:') || '').trim();
+    if(!clientName){ showToast('Importación cancelada — hace falta el nombre del cliente'); return; }
+    const localidad = (window.prompt('Localidad (opcional):') || '').trim();
 
     const items = [];
     const unmatched = [];
@@ -3093,13 +3181,13 @@ document.getElementById('fileViajanteImport').onchange = async (e)=>{
       const row = aoa[i];
       if(!row || !row[0]) continue;
       const sku = String(row[0]).trim();
-      const qty = Number(row[3]) || 0;
-      if(qty<=0) continue;
+      const cajas = Number(row[6]) || 0;
+      if(cajas<=0) continue;
       const art = articles.find(a=>a.sku===sku);
-      if(art) items.push({sku:art.sku, name:art.name, qty});
+      if(art) items.push({sku:art.sku, name:art.name, qty: cajas * (Number(art.pcsPerBox)||1)});
       else unmatched.push(sku);
     }
-    if(items.length===0){ showToast('No se encontraron cantidades cargadas en la planilla'); return; }
+    if(items.length===0){ showToast('No se encontraron cantidades cargadas en la columna "Pedido (cajas)"'); return; }
 
     let note = `Cargado desde la planilla del viajante (${file.name}).`;
     if(unmatched.length) note += `\nSKU no encontrados en el catálogo — revisar a mano: ${unmatched.join(', ')}`;
@@ -3109,7 +3197,7 @@ document.getElementById('fileViajanteImport').onchange = async (e)=>{
       codigoSolicitud: '', telefonoInicial: '',
       clientName, presupuesto: '', items,
       address: { locality: localidad, cuit:'', condicionIva:'Responsable Inscripto' },
-      origen: 'viajante', viajanteNombre,
+      origen: 'viajante', viajanteNombre: currentUser ? currentUser.name : '',
       checklist: [], note, attachments: [],
       createdAt: new Date().toISOString(), createdBy: currentUser ? currentUser.name : '',
     });
